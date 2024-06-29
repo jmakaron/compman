@@ -42,13 +42,13 @@ type HandlerWithError func(http.ResponseWriter, *http.Request) error
 type RouterSpec map[string]map[string]HandlerWithError
 
 type HTTPServiceCfg struct {
-	Secure    bool
-	Addr      string
-	Port      int
-	CertFile  string
-	KeyFile   string
-	SrvPrefix string
-	Debug     bool
+	Secure    bool   `json:"secure"`
+	Addr      string `json:"addr"`
+	Port      int    `json:"port"`
+	CertFile  string `json:"cert_file,omitempty"`
+	KeyFile   string `json:"key_file,omitempty"`
+	SrvPrefix string `json:"service_prefix"`
+	Debug     bool   `json:"-"`
 }
 
 type HTTPService struct {
