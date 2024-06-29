@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package compman;
+option go_package = "github.com/jmakaron/compman/api/go/compman";
+
+//import "google/protobuf/timestamp.proto";
+
+message Company {
+    string Id = 1;
+}
+
+message InsertCompany {
+    string Id = 1;
+    Company val = 2;
+}
+
+message InsertCompanyResponse {
+    string Id = 1;
+}
+
+message UpdateCompany {
+    string Id = 1;
+    Company val = 2;
+}
+
+message UpdateCompanyResponse {
+    string Id = 1;
+}
+
+message DeleteCompany {
+    string Id = 1;
+    Company val = 2;
+}
+
+message DeleteCompanyResponse {
+    string Id = 1;
+}
+
+message QueryCompany {
+    string Id = 1;
+    Company val = 2;
+}
+
+message QueryCompanyResponse {
+    string Id = 1;
+    int32 len = 2;
+    int32 total = 3;
+    repeated Company companies = 4;
+}
