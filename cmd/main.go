@@ -38,6 +38,7 @@ func run() int {
 		log.Error(fmt.Sprintf("failed to parse config, %+v", err))
 		return 1
 	}
+	cfg.HttpCfg.Debug = *debug
 
 	tmpHandler := func(w http.ResponseWriter, r *http.Request) error {
 		ids := httpsrv.GetIdList(r)
