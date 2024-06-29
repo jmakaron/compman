@@ -13,7 +13,7 @@ FROM debian:12-slim
 RUN \
     apt update -y && \
     apt upgrade -y && \
-    apt install ca-certificates curl less mime-support openssl tzdata tar && \
+    apt install -y ca-certificates curl less mime-support openssl tzdata tar && \
     apt clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /go/src/github.com/jmakaron/compman/bin /compman
