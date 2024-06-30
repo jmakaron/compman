@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+
 	"github.com/google/uuid"
+
 	"github.com/jmakaron/compman/internal/app/compman/store/postgres"
 	"github.com/jmakaron/compman/internal/app/compman/types"
 	httpsrv "github.com/jmakaron/compman/internal/pkg/http"
-	"io"
-	"net/http"
 )
 
 const (
@@ -19,26 +21,37 @@ const (
 	companyInsert = "company-insert"
 	companyDelete = "company-delete"
 	companyUpdate = "company-update"
+	serviceLogin  = "login"
 )
 
 func (c *ServiceComponent) getRestAPI() (httpsrv.RouteLayout, *httpsrv.RouterSpec) {
 	rl := httpsrv.RouteLayout{
+		"/login": {
+			serviceLogin: {http.MethodPost, ""},
+		},
 		"/company": {
 			companyGet:    {http.MethodGet, "/{id1}"},
 			companyList:   {http.MethodGet, ""},
 			companyInsert: {http.MethodPost, ""},
 			companyDelete: {http.MethodDelete, "/{id1}"},
-			companyUpdate: {http.MethodPut, "/{id1}"},
+			companyUpdate: {http.MethodPatch, "/{id1}"},
 		}}
 	rs := httpsrv.RouterSpec{
+		serviceLogin:  c.serviceLogin,
 		companyGet:    c.companyGetHandler,
 		companyList:   c.companyListHandler,
-		companyInsert: c.companyInsertHandler,
-		companyDelete: c.companyDeleteHandler,
-		companyUpdate: c.companyUpdateHandler,
+		companyInsert: c.companyInsertHandler, //httpsrv.JWTAuth(c.companyInsertHandler),
+		companyDelete: c.companyDeleteHandler, //httpsrv.JWTAuth(c.companyDeleteHandler),
+		companyUpdate: c.companyUpdateHandler, //httpsrv.JWTAuth(c.companyUpdateHandler),
 	}
 	return rl, &rs
 
+}
+
+func (c *ServiceComponent) serviceLogin(w http.ResponseWriter, r *http.Request) error {
+
+	w.WriteHeader(http.StatusOK)
+	return nil
 }
 
 func (c *ServiceComponent) companyGetHandler(w http.ResponseWriter, r *http.Request) error {
@@ -57,6 +70,7 @@ func (c *ServiceComponent) companyGetHandler(w http.ResponseWriter, r *http.Requ
 		w.WriteHeader(http.StatusBadRequest)
 		return err
 	}
+
 	if err := e.PrepareSelect(map[string]interface{}{
 		"id": id,
 	}); err != nil {
@@ -78,6 +92,7 @@ func (c *ServiceComponent) companyGetHandler(w http.ResponseWriter, r *http.Requ
 		return err
 	}
 	rv := v.([]*types.Company)[0]
+
 	b, err := json.Marshal(rv)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -178,6 +193,30 @@ func (c *ServiceComponent) companyInsertHandler(w http.ResponseWriter, r *http.R
 		w.WriteHeader(http.StatusInternalServerError)
 		return err
 	}
+	var rollback bool
+	defer func(company *types.Company) {
+		if rollback {
+			if err := e.PrepareDelete(map[string]interface{}{"id": company.ID}); err != nil {
+				c.log.Error(fmt.Sprintf("failed to rollback insert operation, %+v", err))
+				return
+			}
+			if err := e.Delete(context.Background()); err != nil {
+				c.log.Error(fmt.Sprintf("failed to rollback insert operation, %+v", err))
+				return
+			}
+		}
+	}(&company)
+	evt, err := types.NewKafkaCompanyEvent(&company, "insert")
+	if err != nil {
+		rollback = true
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
+	if err := c.kp.PublishWithRetry(evt); err != nil {
+		rollback = true
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
@@ -212,6 +251,37 @@ func (c *ServiceComponent) companyDeleteHandler(w http.ResponseWriter, r *http.R
 		}
 		return err
 	}
+	var rollback bool
+	i, err := e.Value()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
+	company := i.([]*types.Company)[0]
+	defer func(company *types.Company) {
+		if rollback {
+			b, _ := json.Marshal(company)
+			if err := e.PrepareInsert(b); err != nil {
+				c.log.Error(fmt.Sprintf("failed to rollback delete operation, %+v", err))
+				return
+			}
+			if err = e.Insert(context.Background()); err != nil {
+				c.log.Error(fmt.Sprintf("failed to rollback delete operation, %+v", err))
+				return
+			}
+		}
+	}(company)
+	evt, err := types.NewKafkaCompanyEvent(company, "delete")
+	if err != nil {
+		rollback = true
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
+	if err := c.kp.PublishWithRetry(evt); err != nil {
+		rollback = true
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
 	w.WriteHeader(http.StatusOK)
 	return nil
 }
@@ -234,7 +304,12 @@ func (c *ServiceComponent) companyUpdateHandler(w http.ResponseWriter, r *http.R
 		return err
 	}
 	{
-		m["id"] = id
+		if id2, ok := m[id]; ok && id != id2 {
+			w.WriteHeader(http.StatusBadRequest)
+			return nil
+		} else if !ok {
+			m["id"] = id
+		}
 		if v, ok := m["type"]; ok {
 			ctype := types.ParseCompanyType(v.(string))
 			if ctype == -1 {
@@ -254,8 +329,49 @@ func (c *ServiceComponent) companyUpdateHandler(w http.ResponseWriter, r *http.R
 			c.log.Debug(fmt.Sprintf("[DB]: %s %+v", entry.End.Sub(entry.Start), entry))
 		}
 	}()
+	var rollback bool
+	{
+		if err := e.PrepareSelect(map[string]interface{}{"id": id}); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return err
+		}
+		if err := e.Select(context.Background()); err != nil {
+			if errors.Is(err, postgres.ErrNotFound) {
+				w.WriteHeader(http.StatusNotFound)
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			return err
+		}
+		i, err := e.Value()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return err
+		}
+		defer func(company *types.Company) {
+			if rollback {
+				m := map[string]interface{}{}
+				b, _ := json.Marshal(company)
+				json.Unmarshal(b, &m)
+				m["type"] = company.CType
+				if err = e.PrepareUpdate(m); err != nil {
+					c.log.Error(fmt.Sprintf("failed to rollback update operation, %+v", err))
+					return
+				}
+				if err = e.Update(context.Background()); err != nil {
+					c.log.Error(fmt.Sprintf("failed to rollback update operation, %+v", err))
+					return
+				}
+			}
+		}(i.([]*types.Company)[0])
+	}
 	if err = e.PrepareUpdate(m); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		if errors.Is(err, postgres.ErrInvalidArg) ||
+			errors.Is(err, postgres.ErrMissingArg) {
+			w.WriteHeader(http.StatusBadRequest)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 		return err
 	}
 	if err = e.Update(context.Background()); err != nil {
@@ -266,12 +382,25 @@ func (c *ServiceComponent) companyUpdateHandler(w http.ResponseWriter, r *http.R
 		}
 		return err
 	}
+
 	i, err := e.Value()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return err
 	}
-	b, err = json.Marshal(i.([]*types.Company)[0])
+	company := i.([]*types.Company)[0]
+	evt, err := types.NewKafkaCompanyEvent(company, "update")
+	if err != nil {
+		rollback = true
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
+	if err := c.kp.PublishWithRetry(evt); err != nil {
+		rollback = true
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
+	b, err = json.Marshal(company)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return err
