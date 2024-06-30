@@ -67,7 +67,7 @@ func (c *CompanyType) UnmarshalJSON(data []byte) error {
 type Company struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
-	Desc        string      `json:"description"`
+	Desc        *string     `json:"description"`
 	EmployeeCnt int         `json:"employee_count"`
 	Registered  bool        `json:"registered"`
 	CType       CompanyType `json:"type"`
