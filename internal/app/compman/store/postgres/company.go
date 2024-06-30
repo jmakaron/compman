@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ var (
 	ErrUnsupportedType = errors.New("unsupported type")
 	ErrNotFound        = errors.New("not found")
 	ErrMissingArg      = errors.New("missing argument")
+	ErrInvalidArg      = errors.New("invalid argument")
 )
 
 const (
@@ -108,8 +110,12 @@ func (e *companyEntity) parseRows(rows pgx.Rows) error {
 	for rows.Next() {
 		var id uuid.UUID
 		var c types.Company
-		if err := rows.Scan(&id, &c.Name, &c.Desc, &c.EmployeeCnt, &c.Registered, &c.CType); err != nil {
+		var d sql.NullString
+		if err := rows.Scan(&id, &c.Name, &d, &c.EmployeeCnt, &c.Registered, &c.CType); err != nil {
 			return err
+		}
+		if d.Valid {
+			c.Desc = &d.String
 		}
 		c.ID = id.String()
 		e.val = append(e.val, &c)
@@ -237,8 +243,8 @@ func (e *companyEntity) PrepareUpdate(v interface{}) error {
 				}
 				fmt.Fprintf(&e.buff, "%s WHERE %s=$%d RETURNING *;", strings.Join(cols, ","), colId, idx+1)
 				e.qa = append(e.qa, i.(string))
-				if len(e.qa) == 1 {
-					err = ErrMissingArg
+				if len(e.qa) != len(t) {
+					err = ErrInvalidArg
 				}
 			} else {
 				err = ErrMissingArg
@@ -268,7 +274,7 @@ func (e *companyEntity) PrepareDelete(v interface{}) error {
 	case map[string]interface{}:
 		if i, ok := t[colId]; ok {
 			e.buff.Reset()
-			fmt.Fprintf(&e.buff, "DELETE FROM %s WHERE %s=$1;", companiesTable, colId)
+			fmt.Fprintf(&e.buff, "DELETE FROM %s WHERE %s=$1 RETURNING *;", companiesTable, colId)
 			e.qa = append(e.qa, i.(string))
 		} else {
 			err = ErrMissingArg
@@ -287,7 +293,7 @@ func (e *companyEntity) Delete(ctx context.Context) error {
 	if e.st == nil {
 		return store.ErrNotConnected
 	}
-	return e.exec(ctx)
+	return e.queryRow(ctx)
 }
 
 func (e *companyEntity) Value() (interface{}, error) {
