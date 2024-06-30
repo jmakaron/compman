@@ -8,14 +8,18 @@ import (
 	"github.com/jmakaron/compman/internal/app/compman/store"
 	"github.com/jmakaron/compman/internal/app/compman/store/postgres"
 	httpsrv "github.com/jmakaron/compman/internal/pkg/http"
+	"github.com/jmakaron/compman/internal/pkg/kafka/kp"
 	"github.com/jmakaron/compman/pkg/logger"
 )
 
 type ServiceComponent struct {
-	log    *logger.Logger
-	cfg    *config.AppConfig
-	st     store.Store
-	ep     *httpsrv.HTTPService
+	log *logger.Logger
+	cfg *config.AppConfig
+
+	st store.Store
+	ep *httpsrv.HTTPService
+	kp kp.KafkaProducer
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -27,6 +31,7 @@ func New(log *logger.Logger) *ServiceComponent {
 func (c *ServiceComponent) Init(cfg *config.AppConfig) error {
 	c.cfg = cfg
 	c.st = postgres.New(c.cfg.Db)
+	c.kp = kp.New(c.cfg.Kp)
 	c.ep = &httpsrv.HTTPService{}
 	return nil
 }
@@ -37,14 +42,22 @@ func (c *ServiceComponent) Start() error {
 		c.log.Debug("could not connect to db")
 		return err
 	}
+	if err := c.kp.Connect(c.ctx); err != nil {
+		c.log.Debug("could not connect to kafka")
+		c.st.Disconnect()
+		return err
+	}
 	layout, spec := c.getRestAPI()
 	if err := c.ep.Init(c.cfg.HttpCfg, layout, spec, c.log); err != nil {
 		c.log.Debug("could not initialize http service component")
+		c.kp.Disconnect()
 		c.st.Disconnect()
 		return err
 	}
 	if err := c.ep.Start(); err != nil {
 		c.log.Debug("could not start http service component")
+		c.kp.Disconnect()
+		c.st.Disconnect()
 		return err
 	}
 	return nil
@@ -55,5 +68,6 @@ func (c *ServiceComponent) Stop() {
 		c.log.Error(fmt.Sprintf("failed to stop http service component, %+v", err))
 	}
 	c.st.Disconnect()
+	c.kp.Disconnect()
 	c.cancel()
 }
