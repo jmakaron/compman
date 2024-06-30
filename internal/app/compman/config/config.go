@@ -6,11 +6,13 @@ import (
 
 	"github.com/jmakaron/compman/internal/app/compman/store/postgres"
 	"github.com/jmakaron/compman/internal/pkg/http"
+	"github.com/jmakaron/compman/internal/pkg/kafka/kp"
 )
 
 type AppConfig struct {
 	HttpCfg http.HTTPServiceCfg `json:"http"`
 	Db      postgres.PGConfig   `json:"db"`
+	Kp      kp.ProducerCfg      `json:"kp"`
 }
 
 func ParseConfigFile(path string) (*AppConfig, error) {
