@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -35,11 +36,13 @@ func (lr *loggedResp) WriteHeader(statusCode int) {
 
 type HandlerWithError func(http.ResponseWriter, *http.Request) error
 
-/* first key: prefix in the format of /<noun>/id1/<noun>/id2/<verb>
- * second key: http method
+// first key is endpoint prefix, second key is handler name, value is [http.Method, <endpoint suffix regexp>]
+type RouteLayout map[string]map[string][]string
+
+/* key: handler name
  * value: func(http.ResponseWriter, *http.Request) error
  */
-type RouterSpec map[string]map[string]HandlerWithError
+type RouterSpec map[string]HandlerWithError
 
 type HTTPServiceCfg struct {
 	Secure    bool   `json:"secure"`
@@ -59,8 +62,9 @@ type HTTPService struct {
 	cancel   context.CancelFunc
 	certFile string
 	keyFile  string
-	ep       string
 	Scheme   string
+	ep       string
+	prefix   string
 }
 
 func (h *HTTPService) wrapHandler(handler HandlerWithError) http.HandlerFunc {
@@ -95,45 +99,42 @@ func (h *HTTPService) wrapHandler(handler HandlerWithError) http.HandlerFunc {
 	}
 }
 
-func (h *HTTPService) Init(cfg HTTPServiceCfg, rspec RouterSpec, log *logger.Logger) error {
+func (h *HTTPService) Init(cfg HTTPServiceCfg, layout RouteLayout, rspec *RouterSpec, log *logger.Logger) error {
+	h.log = log
 	h.certFile = cfg.CertFile
 	h.keyFile = cfg.KeyFile
+	if cfg.Port == 0 {
+		cfg.Port = rand.Intn(8998) + 1001
+		h.log.Debug("cfg port is 0, choosing one at random in range (1000, 10000)")
+	}
 	h.ep = fmt.Sprintf("%s:%d", cfg.Addr, cfg.Port)
-	h.log = log
 	if len(h.certFile) > 0 && len(h.keyFile) > 0 {
 		h.Scheme = "https"
 	} else {
 		h.Scheme = "http"
 	}
 	h.srv = &http.Server{Addr: h.ep}
-	h.registerHandlers(cfg.SrvPrefix, cfg.Debug, rspec)
-	return nil
-}
-
-func (h *HTTPService) registerHandlers(srvPrefix string, debug bool, rspec RouterSpec) {
 	router := mux.NewRouter()
-	r := router.PathPrefix(fmt.Sprintf("/%sd", srvPrefix))
-	if debug {
+	if cfg.Debug {
 		router.PathPrefix("/debug/pprof/cmdline").HandlerFunc(pprof.Cmdline)
 		router.PathPrefix("/debug/pprof/profile").HandlerFunc(pprof.Profile)
 		router.PathPrefix("/debug/pprof/symbol").HandlerFunc(pprof.Symbol)
 		router.PathPrefix("/debug/pprof/trace").HandlerFunc(pprof.Trace)
 		router.PathPrefix("/debug/pprof").HandlerFunc(pprof.Index)
 	}
-	for prefix, rmap := range rspec {
-		var entry *mux.Router
-		if prefix == "/metrics" {
-			entry = router.PathPrefix(prefix).Subrouter() // map metrics to ep/metrics
-		} else {
-			entry = r.PathPrefix(prefix).Subrouter() // map metrics to ep/srvPrefix/<prefix>
-		}
-		for method, handler := range rmap {
-			if handler != nil {
-				entry.HandleFunc(prefix, h.wrapHandler(handler)).Methods(method)
+	r := router.PathPrefix(fmt.Sprintf("/%s", cfg.SrvPrefix)).Subrouter()
+	for prefix, api := range layout {
+		entry := r.PathPrefix(prefix).Subrouter()
+		for name, apiData := range api {
+			if handler := (*rspec)[name]; handler != nil {
+				entry.HandleFunc(apiData[1], h.wrapHandler(handler)).Methods(apiData[0]).Name(name)
+				h.log.Debug(fmt.Sprintf("registered %s: %s %s%s", name, apiData[0], prefix, apiData[1]))
 			}
 		}
 	}
-
+	h.srv.Handler = router
+	h.prefix = cfg.SrvPrefix
+	return nil
 }
 
 func (h *HTTPService) Start() error {
@@ -160,6 +161,7 @@ func (h *HTTPService) Start() error {
 	var err error
 	select {
 	case <-ctx.Done():
+		h.log.Info(fmt.Sprintf("started http service endpoint ( %s://%s/%s )", h.Scheme, h.ep, h.prefix))
 	case err = <-errCh:
 	}
 	return err
@@ -188,9 +190,3 @@ func GetIdList(r *http.Request) []string {
 	}
 	return l
 }
-
-/*
-func GetParams(r *http.Request) map[string]string {
-	return nil
-}
-*/
