@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 
 	"github.com/jmakaron/compman/pkg/logger"
@@ -35,6 +37,33 @@ func (lr *loggedResp) WriteHeader(statusCode int) {
 }
 
 type HandlerWithError func(http.ResponseWriter, *http.Request) error
+
+func JWTAuth(handler HandlerWithError) HandlerWithError {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		authHeader := r.Header.Get("Authorization")
+		if len(authHeader) == 0 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return nil
+		}
+		tokenStr := strings.Replace(authHeader, "Bearer ", "", 1)
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return []byte("MY_SECRET_key"), nil
+		})
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return nil
+		}
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			r = r.WithContext(context.WithValue(r.Context(), "claims", claims))
+			return handler(w, r)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		return nil
+	}
+}
 
 // first key is endpoint prefix, second key is handler name, value is [http.Method, <endpoint suffix regexp>]
 type RouteLayout map[string]map[string][]string
