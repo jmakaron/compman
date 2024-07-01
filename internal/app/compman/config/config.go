@@ -13,6 +13,9 @@ type AppConfig struct {
 	HttpCfg http.HTTPServiceCfg `json:"http"`
 	Db      postgres.PGConfig   `json:"db"`
 	Kp      kp.ProducerCfg      `json:"kp"`
+
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 func ParseConfigFile(path string) (*AppConfig, error) {

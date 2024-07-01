@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/golang-jwt/jwt/v5"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -40,16 +42,47 @@ func (c *ServiceComponent) getRestAPI() (httpsrv.RouteLayout, *httpsrv.RouterSpe
 		serviceLogin:  c.serviceLogin,
 		companyGet:    c.companyGetHandler,
 		companyList:   c.companyListHandler,
-		companyInsert: c.companyInsertHandler, //httpsrv.JWTAuth(c.companyInsertHandler),
-		companyDelete: c.companyDeleteHandler, //httpsrv.JWTAuth(c.companyDeleteHandler),
-		companyUpdate: c.companyUpdateHandler, //httpsrv.JWTAuth(c.companyUpdateHandler),
+		companyInsert: httpsrv.JWTAuth(c.companyInsertHandler),
+		companyDelete: httpsrv.JWTAuth(c.companyDeleteHandler),
+		companyUpdate: httpsrv.JWTAuth(c.companyUpdateHandler),
 	}
 	return rl, &rs
 
 }
 
 func (c *ServiceComponent) serviceLogin(w http.ResponseWriter, r *http.Request) error {
-
+	type loginReq struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
+	var lr loginReq
+	err = json.Unmarshal(b, &lr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return err
+	}
+	if lr.Username != c.cfg.Username || lr.Password != c.cfg.Password {
+		w.WriteHeader(http.StatusForbidden)
+		return nil
+	}
+	secretKey := []byte("MY_SECRET_key")
+	claims := jwt.MapClaims{
+		"authorized": true,
+		"user":       123,
+		"exp":        time.Now().Add(time.Hour * 24).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(secretKey)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
+	w.Header().Set("Authorization", fmt.Sprintf("Bearer %s", tokenString))
 	w.WriteHeader(http.StatusOK)
 	return nil
 }
