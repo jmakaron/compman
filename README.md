@@ -2,16 +2,21 @@
 ### a company-management microservice
 
 ### API
+* ```POST <host-ip>:<host-port>/company-manager/login``` \
+  reads the following JSON Object from the request body, to create and set a jwt token.
+  ```{"username":"<>", "password":"<>"}```
+  The values for ```username,password``` must match the values set in the service config, otherwise
+  403 is returned.
 * ```GET <host-ip>:<host-port>/company-manager/company``` \
   returns a list of JSON Objects of all the companies.
 * ```GET <host-ip>:<host-port>/company-manager/company/<company-id>``` \
-  returns a JSON Object of the company with the given id
+  returns a JSON Object of the company with the given id.
 * ```POST <host-ip>:<host-port>/company-manager/company/<company-id>``` \
-  creates a new company, from the JSON Object in the body of the request
+  creates a new company, from the JSON Object in the body of the request. Requires jwt authentication.
 * ```PATCH <host-ip>:<host-port>/company-manager/company/<company-id>``` \
-  updates company fields contained in the JSON Object in the body of the request, for company with the given id
+  updates company fields contained in the JSON Object in the body of the request, for company with the given id. Requires jwt authentication.
 * ```DELETE <host-ip>:<host-port>/company-manager/company/<company-id>``` \
-  deletes company with the given id
+  deletes company with the given id. Requires jwt authentication.
 
 #### Build
 Simply, use the Makefile in the root project directory.
