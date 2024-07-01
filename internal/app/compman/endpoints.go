@@ -73,7 +73,7 @@ func (c *ServiceComponent) serviceLogin(w http.ResponseWriter, r *http.Request) 
 	secretKey := []byte("MY_SECRET_key")
 	claims := jwt.MapClaims{
 		"authorized": true,
-		"user":       123,
+		"user":       lr.Username,
 		"exp":        time.Now().Add(time.Hour * 24).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
