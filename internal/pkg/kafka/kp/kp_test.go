@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -94,6 +92,10 @@ func TestKafkaIntegration(t *testing.T) {
 		t.Fatalf("failed to publish messages to kafka with retries, %+v", err)
 	}
 	defer p.Disconnect()
+	sentKeys := map[string]struct{}{}
+	for _, d := range data {
+		sentKeys[d.ID] = struct{}{}
+	}
 	//	fmt.Fprintf(os.Stderr, "disconnected\n")
 	config := kafka.ConfigMap{
 		kafkaCFGBootstrapServers: "127.0.0.1:9092",
@@ -101,7 +103,6 @@ func TestKafkaIntegration(t *testing.T) {
 		"auto.offset.reset":      "earliest",
 	}
 
-	fmt.Fprintf(os.Stderr, "creating consumer\n")
 	kc, err := kafka.NewConsumer(&config)
 	if err != nil {
 		t.Fatalf("failed to create consumer, %+v", err)
@@ -111,8 +112,14 @@ func TestKafkaIntegration(t *testing.T) {
 	if err = kc.Subscribe("commandTopic", nil); err != nil {
 		t.Fatalf("failed to subscribe to 'commandTopic' topic, %+v", err)
 	}
-
+	timer := time.NewTimer(5 * time.Minute)
+READ_LOOP:
 	for {
+		select {
+		case <-timer.C:
+			break READ_LOOP
+		default:
+		}
 		e, err := kc.ReadMessage(500 * time.Millisecond)
 		if err != nil {
 			var kErr kafka.Error
@@ -127,13 +134,15 @@ func TestKafkaIntegration(t *testing.T) {
 		if e.TopicPartition.Error != nil {
 			t.Fatalf("received topic partition error from kafka, %+v", e.TopicPartition.Error)
 		}
+		if _, ok := sentKeys[string(e.Key)]; !ok {
+			continue
+		}
 		var evt types.KafkaCompanyEvent
 		if err = json.Unmarshal(e.Value, &evt); err != nil {
 			kc.Unsubscribe()
 			kc.Close()
 			t.Fatalf("could not unmarshal kafka message, %+v", err)
 		}
-		fmt.Fprintf(os.Stderr, "received message %s %+v\n", string(e.Key), evt)
 		received[string(e.Key)] = &evt
 		kc.StoreMessage(e)
 
@@ -143,7 +152,9 @@ func TestKafkaIntegration(t *testing.T) {
 	}
 	kc.Unsubscribe()
 	kc.Close()
-
+	if len(data) != len(received) {
+		t.Fatalf("timeout with %d out of %d events being read from kafka", len(received), len(data))
+	}
 	for idx, c := range data {
 		var op string
 		if idx < 3 {
