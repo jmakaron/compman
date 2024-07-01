@@ -2,7 +2,7 @@
     "http": {
         "secure": false,
         "addr": "127.0.0.1",
-        "port": 1312,
+        "port": 8089,
         "cert_file": "",
         "key_file": "",
         "service_prefix": "company-manager"
