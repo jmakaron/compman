@@ -35,6 +35,8 @@ should be changed so they have the ip address of the host running docker compose
   edit the ```./cloudbuild/docker-compose-with-compman.yml``` file
   and set ```KAFKA_ADVERTISED_LISTENERS``` to  ```PLAINTEXT://kafka:29092,PLAINTEXT_HOST://<host ip address>:9092```
   where ```<host ip address>``` is the ip address of the host running docker compose.
+  
   Also edit the ```command``` field of compman to remove debug mode (by removing ```"--debug=true"``` field)
+  
   Run ```./cloudbuild/$ docker compose up -f ./docker-compose-with-compman.yml```
   to run the compman service image and its dependencies
