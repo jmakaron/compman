@@ -23,5 +23,7 @@
         "queue_buffering_max_ms": 100,
         "compression_codec": "none",
         "debug": ","
-    }
+    },
+    "username":"admin",
+    "password":"123"
 }
