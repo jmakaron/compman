@@ -22,6 +22,8 @@ api:
 .PHONY: ${NAME}
 ${NAME}:
 		mkdir -p bin
+		go mod tidy
+		go mod download
 		GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags $(LDFLAGS) -o bin ./...
 
 .PHONY: clean
