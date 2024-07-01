@@ -1,0 +1,27 @@
+{
+    "http": {
+        "secure": false,
+        "addr": "",
+        "port": 8089,
+        "cert_file": "",
+        "key_file": "",
+        "service_prefix": "company-manager"
+    },
+    "db": {
+        "addr": "192.168.1.7",
+        "port": 5432,
+        "username": "postgres",
+        "password": "postgres",
+        "db_name": "compman_db"
+    },
+    "kp": {
+        "bootstrap_servers": "192.168.1.7:9092",
+        "acks": -1,
+        "enable_idempotence": false,
+        "max_in_flight": 5,
+        "retries": 5,
+        "queue_buffering_max_ms": 100,
+        "compression_codec": "none",
+        "debug": ","
+    }
+}
